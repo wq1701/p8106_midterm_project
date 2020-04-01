@@ -1,0 +1,66 @@
+---
+title: "p8106_mid_project"
+author: "wq2151"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+# read data
+```{r}
+# read data
+stock = read_csv("./data/2018_Financial_Data.csv") %>% 
+  janitor::clean_names() %>% 
+  rename(price2019 = "x2019_price_var_percent")
+```
+
+# EDA and viz
+```{r}
+stock %>% 
+  mutate(class = as.factor(class)) %>% 
+  group_by(class) %>% 
+  summarise(number = n()) %>% 
+  ggplot(aes(x = class, y = number)) + 
+  geom_col(aes(fill = class)) +
+  geom_text(aes(label = number), vjust = -0.1) + 
+  labs(title = "Distribution of Stock Class", 
+       x = "0 for BUY, 1 for SELL", y = "Number")
+
+stock %>% 
+  group_by(sector) %>% 
+  summarise(number = n()) %>% 
+  ggplot(aes(x = reorder(sector, -number), y = number)) + 
+  geom_col(aes(fill = sector)) +
+  geom_text(aes(label = number), vjust = -0.1) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8), 
+        legend.position = "none") + 
+  labs(title = "Distribution of Company Sectors", 
+       x = "Sector", y = "Number")
+```
+
+# check na and 0 values
+```{r}
+table(is.na(stock))
+
+# first we count the nan value in each row (for each company)
+# 225 - 4 = 221 financial indicators
+stock = stock %>% 
+  mutate(nan = rowSums(is.na(.)), 
+         nan_ratio = nan/221, 
+         zero = rowSums(. == 0), 
+         zero_ratio = zero/221)
+
+stock %>% count(nan_ratio > 0.9)
+
+nan_90_stock = stock %>% 
+  filter(nan_ratio >= 0.9)
+
+stock %>% count(nan_ratio == 1)
+
+```
+
+
+
