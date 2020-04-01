@@ -1,0 +1,40 @@
+---
+title: "trashcan"
+author: "wq2151"
+date: "4/1/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This place is to hold those code that has been temporarily disposed, might be used again in the future, maybe not. 
+
+count na across column, from eda.rmd
+```{r}
+# count the NAs in each column
+nan_col_table = as.data.frame(colSums(is.na(original_data))) %>%
+  tibble::rownames_to_column(., "colnames") %>%
+  rename(col_nan = 'colSums(is.na(original_data))') %>%
+  mutate(ratio = col_nan/4392)
+
+nan_col_table %>% count(ratio > 0.9)
+
+nan_col_table %>% ggplot(aes(x = reorder(colnames, -ratio), y = ratio)) +
+  geom_col() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+        legend.position = "none") +
+  labs(title = "Distribution of NAN across column",
+       x = "column", y = "ratio")
+```
+
+a filter nan table, from eda 
+```{r}
+
+stock_na_count %>% count(nan_row_ratio > 0.9)
+
+nan_90_stock = stock_na_count %>% 
+  filter(nan_row_ratio <= 0.9)
+```
+

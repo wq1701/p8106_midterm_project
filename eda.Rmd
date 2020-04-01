@@ -1,7 +1,7 @@
 ---
 title: "p8106_mid_project"
 author: "wq2151"
-output: pdf_document
+output: md_document
 ---
 
 ```{r setup, include=FALSE}
@@ -12,14 +12,15 @@ library(tidyverse)
 # read data
 ```{r}
 # read data
-stock = read_csv("./data/2018_Financial_Data.csv") %>% 
+original_data = read_csv("./data/2018_Financial_Data.csv") %>% 
   janitor::clean_names() %>% 
-  rename(price2019 = "x2019_price_var_percent")
+  rename(price2019 = "x2019_price_var_percent", 
+         company = "x1")
 ```
 
-# EDA and viz
+# EDA and viz, get a rough idea about the data
 ```{r}
-stock %>% 
+original_data %>% 
   mutate(class = as.factor(class)) %>% 
   group_by(class) %>% 
   summarise(number = n()) %>% 
@@ -29,7 +30,7 @@ stock %>%
   labs(title = "Distribution of Stock Class", 
        x = "0 for BUY, 1 for SELL", y = "Number")
 
-stock %>% 
+original_data %>% 
   group_by(sector) %>% 
   summarise(number = n()) %>% 
   ggplot(aes(x = reorder(sector, -number), y = number)) + 
@@ -41,26 +42,36 @@ stock %>%
        x = "Sector", y = "Number")
 ```
 
-# check na and 0 values
+# check na values
 ```{r}
-table(is.na(stock))
+table(is.na(original_data))
 
 # first we count the nan value in each row (for each company)
 # 225 - 4 = 221 financial indicators
-stock = stock %>% 
-  mutate(nan = rowSums(is.na(.)), 
-         nan_ratio = nan/221, 
-         zero = rowSums(. == 0), 
-         zero_ratio = zero/221)
+stock_na_count = original_data %>% 
+  mutate(nan_row = rowSums(is.na(.)), 
+         nan_row_ratio = nan_row/221)
 
-stock %>% count(nan_ratio > 0.9)
-
-nan_90_stock = stock %>% 
-  filter(nan_ratio >= 0.9)
-
-stock %>% count(nan_ratio == 1)
-
+stock_na_count %>% 
+  ggplot(aes(x = reorder(company, -nan_row_ratio), y = nan_row_ratio)) +
+  geom_col() + 
+  theme(axis.text.x = element_blank()) + 
+  labs(title = "Number of NA across rows", x = "Company", y = "NA ratio")
 ```
 
+From the plot, we can see that there are lot of NA in each rows (company). Also, from the dataset we can see that some values are 0 where it couldn't be zero in the normal sense; for example, the R&D expense of GE is 0 (which is not correct). Therefore we assume that NA are the same as 0 in this dataset, produced by accounting/financial report errors. 
 
+```{r}
+# fill na with 0
+stock = original_data %>% 
+  mutate_if(is.numeric, ~replace(., is.na(.), 0))
+
+# no na now
+table(is.na(stock))
+```
+
+count zero values across rows
+```{r}
+
+```
 
