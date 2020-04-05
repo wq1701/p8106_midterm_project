@@ -1,0 +1,296 @@
+---
+title: "Midterm Project Report"
+author: "wq2151"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 2
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '2'
+header-includes:
+- \usepackage{fancyhdr}
+- \usepackage{lipsum}
+- \pagestyle{fancy}
+- \fancyhead[R]{\thepage}
+- \fancypagestyle{plain}{\pagestyle{fancy}}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(caret)
+
+set.seed(2)
+```
+
+```{r warning=FALSE}
+# import data
+original_data = read_csv("./data/2018_Financial_Data.csv") %>% 
+  janitor::clean_names() %>% 
+  rename(price2019 = "x2019_price_var_percent", 
+         company = "x1")
+```
+
+
+```{r warning=FALSE, include=FALSE}
+table(is.na(original_data))
+
+stock_na_count = original_data %>% 
+  mutate(nan_row = rowSums(is.na(.)), 
+         nan_row_ratio = nan_row/221) 
+
+p_na_row = stock_na_count %>% 
+  ggplot(aes(x = reorder(company, -nan_row_ratio), y = nan_row_ratio)) +
+  geom_col(aes(fill = sector)) + 
+  theme(axis.text.x = element_blank(), legend.position = "none") + 
+  labs(title = "Number of NAs across rows", x = "Company, color = Sector", y = "NA ratio")
+  
+p_na_sec = original_data %>% 
+  group_by(sector) %>% 
+  summarise_each(funs(sum(is.na(.))))  %>% 
+  mutate(na_sec = rowSums(.[, 2:224, drop = F])) %>% 
+  select(sector, na_sec) %>% 
+  ggplot(aes(x = reorder(sector, -na_sec), y = na_sec)) +
+  geom_col(aes(fill = sector)) + 
+  theme(axis.text.x = element_text(angle = 20, hjust = 1, size = 8), 
+        legend.position = "none") + 
+  labs(title = "Number of NAs across Sectors", 
+       x = "Sector", y = "Number")
+
+p_class = original_data %>% 
+  mutate(class = as.factor(class)) %>% 
+  group_by(class) %>% 
+  summarise(number = n()) %>% 
+  mutate(class = recode(class, "1" = "buy", 
+                         "0" = "sell")) %>% 
+  ggplot(aes(x = class, y = number)) + 
+  geom_col(aes(fill = class)) +
+  geom_text(aes(label = number), vjust = 1) + theme(legend.position = "none") +
+  labs(title = "Distribution of Stock Class", 
+       x = "Class", y = "Number")
+
+p_sec = original_data %>% 
+  group_by(sector) %>% 
+  summarise(number = n()) %>% 
+  ggplot(aes(x = reorder(sector, -number), y = number, fill = sector)) + 
+  geom_col() +
+  geom_text(aes(label = number), vjust = 1, size = 4) + 
+  theme(axis.text.x = element_text(angle = 20, hjust = 1, size = 8), 
+        legend.position = "none") + 
+  labs(title = "Distribution of Company Sectors", 
+       x = "Sector", y = "Number")
+
+
+# Fill NA values with 0, and split the data into training and test set
+
+stock = original_data %>% 
+  mutate_if(is.numeric, ~replace(., is.na(.), 0))
+
+stock = stock %>% select(-class, -company)
+
+
+nan_col_table = as.data.frame(colSums(stock == 0)) %>%
+  tibble::rownames_to_column(., "col_names") %>%
+  rename(col_nan = 'colSums(stock == 0)') %>%
+  mutate(ratio = col_nan/4392) 
+
+p_col_zero = nan_col_table %>% 
+  ggplot(aes(x = reorder(col_names, -ratio), y = ratio)) + 
+  geom_col() + 
+  ylim(0,1) +
+  theme(axis.text.x = element_blank(), 
+        legend.position = "none") + 
+  labs(title = "Zero/Missing values across Columns", 
+       x = "Predictors", y = "Zero values Ratio")
+
+p_row_zero = original_data %>% 
+  mutate(zero_n = rowSums(stock == 0), 
+         zero_ratio = zero_n/221) %>% 
+  ggplot(aes(x = reorder(company, -zero_n), y = zero_ratio)) +
+  geom_col() + 
+  theme(axis.text.x = element_blank()) + 
+  labs(title = "Zero values across rows", x = "Company", y = "zero ratio")
+
+# Models
+
+trRows = createDataPartition(stock$price2019,
+                             p = .75, 
+                             list = F)
+
+# x = model.matrix(price2019~., stock)[, -1]
+# y = stock$price2019
+
+# training data
+xtrain = model.matrix(price2019~.,stock)[trRows,-1] 
+ytrain = stock$price2019[trRows]
+# test data
+xtest = model.matrix(price2019~.,stock)[-trRows,-1] 
+ytest = stock$price2019[-trRows]
+
+ctrl1 = trainControl(method = "repeatedcv", number = 10, repeats = 5)
+
+# Linear
+lm.fit = train(xtrain, ytrain, 
+            method = "lm", 
+            trControl = ctrl1)
+
+predy2.lm = predict(lm.fit, newdata = xtest)
+
+lm.mse = ModelMetrics::mse(ytest, predy2.lm)
+
+# ridge
+ridge.fit = train(xtrain, ytrain, 
+                  method = "glmnet", 
+                  tuneGrid = expand.grid(alpha = 0,
+                                         lambda = exp(seq(2, 10, length = 100))),
+                  # preProc = c("center", "scale"),
+                  trControl = ctrl1)
+
+# plot(ridge.fit, xTrans = function(x) log(x))
+
+predy2.ridge <- predict(ridge.fit, newdata = xtest)
+
+ridge.mse = ModelMetrics::mse(ytest, predy2.ridge)
+
+p_ridge = ggplot(ridge.fit, highlight = T) + coord_trans(x = "log")
+
+# lasso
+lasso.fit <- train(xtrain, ytrain,
+                   method = "glmnet",
+                   tuneGrid = expand.grid(alpha = 1,
+                                          lambda = exp(seq(-1, 8, length = 100))), 
+                   # preProc = c("center", "scale"),
+                   trControl = ctrl1)
+
+lasso.fit$bestTune
+# plot(lasso.fit, xTrans = function(x) log(x))
+
+predy2.lasso <- predict(lasso.fit, newdata = xtest)
+
+lasso.mse = ModelMetrics::mse(ytest, predy2.lasso)
+
+p_lasso = ggplot(lasso.fit, highlight = T) + coord_trans(x = "log")
+
+# enet
+enet.fit <- train(xtrain, ytrain,
+                  method = "glmnet",
+                  tuneGrid = expand.grid(alpha = seq(0, 1, length = 5),
+                                         lambda = exp(seq(-2, 4, length = 50))),
+                  # preProc = c("center", "scale"),
+                  trControl = ctrl1)
+
+enet.fit$bestTune
+
+predy2.enet <- predict(enet.fit, newdata = xtest)
+
+enet.mse = ModelMetrics::mse(ytest, predy2.enet)
+
+p_enet = ggplot(enet.fit, highlight = T)
+
+# pcr
+pcr.fit <- train(xtrain, ytrain,
+                 method = "pcr",
+                 tuneGrid = data.frame(ncomp = 1:200), 
+                 trControl = ctrl1,
+                 preProc = c("center", "scale"))
+
+
+trans <- preProcess(xtrain, method = c("center", "scale"))
+
+predy2.pcr <- predict(pcr.fit$finalModel, 
+                       newdata = predict(trans, xtest), 
+                       ncomp = pcr.fit$bestTune$ncomp)
+
+pcr.mse = ModelMetrics::mse(ytest, predy2.pcr)
+p_pcr = ggplot(pcr.fit, highlight = T)
+
+# pls
+pls.fit <- train(xtrain, ytrain,
+                 method = "pls",
+                 tuneGrid = data.frame(ncomp = 1:19), trControl = ctrl1,
+                 preProc = c("center", "scale"))
+
+
+predy2.pls <- predict(pls.fit, newdata = xtest)
+
+pls.mse = ModelMetrics::mse(ytest, predy2.pls)
+
+p_pls = ggplot(pls.fit, highlight = T)
+
+
+# gridExtra::grid.arrange(p_ridge, p_lasso, p_pcr, p_pls, p_enet)
+
+# the mse of linear model is too big
+resamp <- resamples(list(lm = lm.fit,
+                         pls = pls.fit
+                         ))
+
+p1 = bwplot(resamp, metric = "RMSE")
+
+resamp2 = resamples(list(lasso = lasso.fit, 
+                         ridge = ridge.fit, 
+                         enet = enet.fit, 
+                         pcr = pcr.fit))
+
+p2 = bwplot(resamp2, metric = "RMSE")
+
+# gridExtra::grid.arrange(p1, p2)
+```
+
+
+# Introduction
+
+Financial market prediction has always been a field under heat. Over the recent years, researchers, investors, and managers have dedicated in developing models for forecasting the stock market behavior. With the emerging of big data and the increase in computing power, the trend continues. One of the main challenges of stock price prediction is that they are affected by highly correlated factors, while there could be hundreds of different financial indicators. Moreover, factors such as politics, psychology, and government interference are hard to be quantified and used in the existing models. 
+
+The dataset used in this project is from the 2018 US stock market price with more than `r nrow(original_data)` stocks and `r ncol(original_data)-3` commonly used financial indicators. The `price var [%]` will be used as the response. Variable `class` indicates if the stock is worth-buying or not. To clarify, the reponse represents the stock price variation of year `2019`: if positeve, it means that the price is higher at the end of year `2019`, so a buyer should consider buy the stock at the begining of `2019` and sell it for profit at the end of the year. 
+
+# Exploratory Data Analysis
+
+First, the dataset contains huge amount of NA valus, which should be removed or filled with 0 value; `Financial Service` companies has the most NA values; Most of the stock perform well from a trading perspective; Also, from the dataset we can see that some values are 0 where it couldn't be zero in the normal sense; for example, the R&D expense of GE is 0 (which is not correct). Therefore we assume that NA are the same as 0 in this dataset, produced by accounting/financial report errors. 
+
+
+```{r echo=FALSE}
+gridExtra::grid.arrange(p_na_row, p_na_sec, 
+                        p_sec, p_class, nrow = 2)
+gridExtra::grid.arrange(p_col_zero, p_row_zero, nrow = 1)
+
+```
+
+
+# Methods
+
+Several different regression models were used to predict the stock price variation. `Ridge` regression uses L2 penalty term while `Lasso` regression uses L1 penalty term, which might cause `lasso` regression has less coefficients than `ridge` regression model. Elastic net use lasso penalty to select deature but use regularization via ridge-type penalty. Principle component regression (PCR) and Partial least square (PLS) methods are also used to fit the data. 
+
+The data is split into 2 part, one for training (75%) and one for testing (25%). the test data will be later used for evaluating the model performance. 
+
+
+# Results
+
+Lasso, ridge, enet have close RMSE results. The `ridge` model basically shrink most of the coefficients towards zero, but not exacty zero; the lambda is not optimal as the range of lambda goes wider, the best lambda go up to the right bound of the range. It indicates that the bias of the ridge regression is significantly high, meaning that the model is underfitting the data. On the other hand, `lasso` produces a relatively small lambda `r lasso.fit$bestTune` as it forces some of the coefficients to be zero. As the lasso is more indifferenet to very correlated predictors, its better performance on highly correlated financial data is not unexpected. Overall speaking, `ridge`, `lasso`, and `elastic net` has close results, it is hard to determine which one is dominantly better than one another. Traditional linear model has the worst performance in predicting the response, which might be caused by the high correlation of predictors and a lot of 0 values. PLS can be viewed as a supervised learnign procedure while PCR is an unsupervised procedure. The PLS model has significant higher MSE than other models (excluding the linear model). To conclude, in order to better predict the stock market variation, it better to choose `lasso` or `elastic net` methods. 
+
+
+```{r echo=FALSE}
+gridExtra::grid.arrange(p_ridge, p_lasso, p_pcr, p_pls, nrow = 2)
+
+p_enet
+```
+
+```{r echo=FALSE}
+tibble(lm.mse, ridge.mse, lasso.mse, enet.mse, pcr.mse, pls.mse) %>% 
+  knitr::kable(caption = "MSE of different models")
+```
+
+```{r echo=FALSE}
+gridExtra::grid.arrange(p1, p2)
+```
+
+# Limitations
+
+The dataset has been shown to contains too many zero values and missing values. Some columns (predictors) are over 90 percent zero/NA dominant. It is a big challenge in dealing with these cells, as they will not be able to represent the real stock market data. Second, the MARS and GAM model are not used as all the RMSE metrics are missed in the model fitting process. Better approaches might exist in filling the zero or missing values to get a better analysis results and prediction. 
+
+
+
+
+
